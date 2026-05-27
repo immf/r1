@@ -124,13 +124,84 @@ const FAIXA_LABELS = FAIXAS.slice(0,-1).map((v,i) => {
 });
 const NF = FAIXA_LABELS.length;
 
-let DATA = []; // {ndoc, hrp5, hrp5_1b, assal}
+// AGG: estrutura ja agregada (compativel com o que o Python embute no modo estatico).
+// Forma: { groups: { T:G, S:G, N:G }, nTotal }
+// G = { n, M:[NF][NF], distH1:[NF], distH2:[NF], meanH1:[NF], meanH2:[NF],
+//       dir:{aum,dim,mant}, kpis:{...} }
+let AGG = null;
 
 function faixa(v){
   for (let i=0;i<NF;i++){
     if (v >= FAIXAS[i] && v < FAIXAS[i+1]) return i;
   }
   return v >= FAIXAS[NF] ? NF-1 : -1;
+}
+
+function emptyGroup(){
+  return {
+    n:0,
+    M: Array.from({length:NF}, () => Array(NF).fill(0)),
+    distH1: Array(NF).fill(0),
+    distH2: Array(NF).fill(0),
+    sumH1ByOrigin: Array(NF).fill(0),
+    sumH2ByOrigin: Array(NF).fill(0),
+    countByOrigin: Array(NF).fill(0),
+    dir:{aum:0, dim:0, mant:0},
+    sums:{ s1:0, s2:0, somaDif:0, somaAbsDif:0, somaAbsDifNZ:0, countNZ:0,
+           mantFaixa:0, subFaixa:0, descFaixa:0 }
+  };
+}
+
+function pushRow(G, hrp5, hrp5_1b){
+  G.n++;
+  const fa = faixa(hrp5), fb = faixa(hrp5_1b);
+  if (fa>=0 && fb>=0) G.M[fa][fb]++;
+  if (fa>=0) G.distH1[fa]++;
+  if (fb>=0) G.distH2[fb]++;
+  if (fa>=0){ G.sumH1ByOrigin[fa]+=hrp5; G.sumH2ByOrigin[fa]+=hrp5_1b; G.countByOrigin[fa]++; }
+  const d = hrp5_1b - hrp5;
+  G.sums.s1 += hrp5; G.sums.s2 += hrp5_1b;
+  G.sums.somaDif += d;
+  G.sums.somaAbsDif += Math.abs(d);
+  if (d !== 0){ G.sums.somaAbsDifNZ += Math.abs(d); G.sums.countNZ++; }
+  if (d > 0) G.dir.aum++; else if (d < 0) G.dir.dim++; else G.dir.mant++;
+  if (fa === fb) G.sums.mantFaixa++; else if (fb > fa) G.sums.subFaixa++; else G.sums.descFaixa++;
+}
+
+function finalizeGroup(G){
+  const n = G.n;
+  G.meanH1 = G.sumH1ByOrigin.map((s,i)=>G.countByOrigin[i]?Math.round(s/G.countByOrigin[i]):0);
+  G.meanH2 = G.sumH2ByOrigin.map((s,i)=>G.countByOrigin[i]?Math.round(s/G.countByOrigin[i]):0);
+  if (!n){ G.kpis = null; return G; }
+  const m1 = G.sums.s1/n, m2 = G.sums.s2/n;
+  G.kpis = {
+    n, media1:m1, media2:m2,
+    difMedias: m2 - m1,
+    pctVarMedia: m1 ? 100*(m2-m1)/m1 : 0,
+    pctAumentou: 100*G.dir.aum/n,
+    pctDiminuiu: 100*G.dir.dim/n,
+    pctManteve: 100*G.dir.mant/n,
+    pctMantFaixa: 100*G.sums.mantFaixa/n,
+    pctSubFaixa: 100*G.sums.subFaixa/n,
+    pctDescFaixa: 100*G.sums.descFaixa/n,
+    difMediaPP: G.sums.somaDif/n,
+    difMediaAbs: G.sums.somaAbsDif/n,
+    difMediaAbsNZ: G.sums.countNZ ? G.sums.somaAbsDifNZ/G.sums.countNZ : 0,
+  };
+  // limpa campos intermediarios para nao pesar
+  delete G.sumH1ByOrigin; delete G.sumH2ByOrigin; delete G.countByOrigin; delete G.sums;
+  return G;
+}
+
+function aggregateRows(rows){
+  const groups = { T: emptyGroup(), S: emptyGroup(), N: emptyGroup() };
+  for (const r of rows){
+    pushRow(groups.T, r.hrp5, r.hrp5_1b);
+    if (r.assal === "S") pushRow(groups.S, r.hrp5, r.hrp5_1b);
+    else if (r.assal === "N") pushRow(groups.N, r.hrp5, r.hrp5_1b);
+  }
+  for (const k of ["T","S","N"]) finalizeGroup(groups[k]);
+  return { groups, nTotal: groups.T.n };
 }
 
 function detectSep(line){
@@ -168,18 +239,9 @@ function parseCSV(text){
   return out;
 }
 
-function filtrar(){
-  const f = document.getElementById("filtro").value;
-  return f === "T" ? DATA : DATA.filter(r => r.assal === f);
-}
-
-function calcMatriz(rows){
-  const M = Array.from({length:NF}, () => Array(NF).fill(0));
-  for (const r of rows){
-    const a = faixa(r.hrp5), b = faixa(r.hrp5_1b);
-    if (a>=0 && b>=0) M[a][b]++;
-  }
-  return M;
+function grupoAtual(){
+  if (!AGG) return null;
+  return AGG.groups[document.getElementById("filtro").value] || null;
 }
 
 function renderMatriz(M){
@@ -214,39 +276,6 @@ function renderMatriz(M){
   html += `<td><b>${total}</b></td></tr>`;
   html += '</table>';
   document.getElementById("matriz").innerHTML = html;
-}
-
-function calcKPIs(rows){
-  const n = rows.length;
-  if (!n) return null;
-  let s1=0,s2=0,aum=0,dim=0,mant=0,mantFaixa=0,subFaixa=0,desFaixa=0;
-  let somaDif=0, somaAbsDif=0, somaAbsDifNZ=0, countNZ=0;
-  for (const r of rows){
-    s1 += r.hrp5; s2 += r.hrp5_1b;
-    const d = r.hrp5_1b - r.hrp5;
-    somaDif += d;
-    somaAbsDif += Math.abs(d);
-    if (d !== 0){ somaAbsDifNZ += Math.abs(d); countNZ++; }
-    if (d > 0) aum++; else if (d < 0) dim++; else mant++;
-    const fa = faixa(r.hrp5), fb = faixa(r.hrp5_1b);
-    if (fa === fb) mantFaixa++; else if (fb > fa) subFaixa++; else desFaixa++;
-  }
-  const m1 = s1/n, m2 = s2/n;
-  return {
-    n,
-    media1: m1, media2: m2,
-    difMedias: m2 - m1,
-    pctVarMedia: m1 ? 100*(m2-m1)/m1 : 0,
-    pctAumentou: 100*aum/n,
-    pctDiminuiu: 100*dim/n,
-    pctManteve: 100*mant/n,
-    pctMantFaixa: 100*mantFaixa/n,
-    pctSubFaixa: 100*subFaixa/n,
-    pctDescFaixa: 100*desFaixa/n,
-    difMediaPP: somaDif/n,        // diferenca media por pessoa (com sinal)
-    difMediaAbs: somaAbsDif/n,    // diferenca media em modulo (todos)
-    difMediaAbsNZ: countNZ ? somaAbsDifNZ/countNZ : 0, // modulo dif onde dif != 0
-  };
 }
 
 function fmtBRL(v){ return v.toLocaleString("pt-BR",{style:"currency",currency:"BRL",maximumFractionDigits:0}); }
@@ -290,20 +319,10 @@ const AXIS = {
   splitLine:{ lineStyle:{ color:CSS_GRID } }
 };
 
-function renderCharts(rows){
-  const c1 = Array(NF).fill(0), c2 = Array(NF).fill(0);
-  const somaPorFaixa1 = Array(NF).fill(0), somaPorFaixa2 = Array(NF).fill(0), nPorFaixa = Array(NF).fill(0);
-  let aum=0,dim=0,mant=0;
-  for (const r of rows){
-    const fa = faixa(r.hrp5), fb = faixa(r.hrp5_1b);
-    if (fa>=0) c1[fa]++;
-    if (fb>=0) c2[fb]++;
-    if (fa>=0){ somaPorFaixa1[fa]+=r.hrp5; somaPorFaixa2[fa]+=r.hrp5_1b; nPorFaixa[fa]++; }
-    const d = r.hrp5_1b - r.hrp5;
-    if (d>0) aum++; else if (d<0) dim++; else mant++;
-  }
-  const mediaF1 = somaPorFaixa1.map((s,i)=>nPorFaixa[i]?Math.round(s/nPorFaixa[i]):0);
-  const mediaF2 = somaPorFaixa2.map((s,i)=>nPorFaixa[i]?Math.round(s/nPorFaixa[i]):0);
+function renderCharts(G){
+  const c1 = G.distH1, c2 = G.distH2;
+  const mediaF1 = G.meanH1, mediaF2 = G.meanH2;
+  const aum = G.dir.aum, dim = G.dir.dim, mant = G.dir.mant;
 
   chFaixas = getChart("chartFaixas", chFaixas);
   chFaixas.setOption({
@@ -356,45 +375,48 @@ window.addEventListener("resize", () => {
 });
 
 function refresh(){
-  const rows = filtrar();
-  document.getElementById("status").textContent =
-    DATA.length ? `${rows.length} de ${DATA.length} linhas no filtro atual.` : "Carregue um CSV.";
-  if (!rows.length){
+  const G = grupoAtual();
+  const status = document.getElementById("status");
+  if (!AGG){ status.textContent = "Carregue um CSV."; return; }
+  status.textContent = `${G ? G.n : 0} de ${AGG.nTotal} linhas no filtro atual.`;
+  if (!G || !G.n){
     document.getElementById("matriz").innerHTML = '<div class="empty">Sem dados para o filtro.</div>';
     renderKPIs(null);
     return;
   }
-  renderMatriz(calcMatriz(rows));
-  renderKPIs(calcKPIs(rows));
-  renderCharts(rows);
+  renderMatriz(G.M);
+  renderKPIs(G.kpis);
+  renderCharts(G);
+}
+
+function ingestCSVText(text){
+  AGG = aggregateRows(parseCSV(text));
+  refresh();
 }
 
 document.getElementById("file").addEventListener("change", e => {
   const f = e.target.files[0]; if (!f) return;
   const r = new FileReader();
-  r.onload = () => { DATA = parseCSV(r.result); refresh(); };
+  r.onload = () => ingestCSVText(r.result);
   r.readAsText(f, "utf-8");
 });
 document.getElementById("filtro").addEventListener("change", refresh);
 document.getElementById("modo").addEventListener("change", refresh);
-document.getElementById("sep").addEventListener("change", () => {
-  // re-parse se ja tem texto carregado seria ideal; aqui apenas pede recarregar
-});
 document.getElementById("exemplo").addEventListener("click", async () => {
   try {
     const r = await fetch("dados_renda.csv");
-    const t = await r.text();
-    DATA = parseCSV(t); refresh();
+    ingestCSVText(await r.text());
   } catch(err){
     alert("Nao foi possivel carregar dados_renda.csv (precisa estar servido via HTTP, nao file://). Use o input de arquivo.");
   }
 });
 
-// Modo estatico: se window.__EMBED_DATA__ existir, esconde controles de arquivo e usa os dados embutidos.
-if (Array.isArray(window.__EMBED_DATA__)) {
-  DATA = window.__EMBED_DATA__;
-  const hide = ["fileGroup", "sepGroup", "exemplo"];
-  hide.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = "none"; });
+// Modo estatico: se window.__EMBED_AGG__ existir, esconde controles de arquivo e usa o agregado embutido.
+if (window.__EMBED_AGG__ && window.__EMBED_AGG__.groups) {
+  AGG = window.__EMBED_AGG__;
+  ["fileGroup","sepGroup","exemplo"].forEach(id => {
+    const el = document.getElementById(id); if (el) el.style.display = "none";
+  });
 }
 
 refresh();

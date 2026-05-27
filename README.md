@@ -7,7 +7,7 @@ Dashboard interativo (ECharts) que compara duas medidas de renda por indivíduo,
 - `gerar_csv.py` — gera `dados_renda.csv` fictício com 2000 linhas (`NDOC;HRP5;HRP5_1B;ASSALARIADO`).
 - `dados_renda.csv` — exemplo já gerado.
 - `dash.html` — dashboard interativo com upload de CSV (abra direto no navegador ou sirva via HTTP).
-- `gerar_dash_estatico.py` — lê o CSV e gera `dash_estatico.html` com os dados embutidos (sem input de arquivo).
+- `gerar_dash_estatico.py` — lê o CSV, **pré-agrega tudo em Python** (matriz, KPIs, distribuições, médias por faixa para Total/S/N) e gera `dash_estatico.html` com apenas o agregado embutido (~poucos KB, tamanho constante em N).
 - `dash_estatico.html` — versão estática pronta para abrir com duplo-clique.
 
 ## Faixas
