@@ -170,13 +170,15 @@ def dash(csv_path: str, template_path: str, out_path: str) -> None:
     agg = _agregar(csv_p)
     payload = json.dumps(agg, ensure_ascii=False, separators=(",", ":"))
     html = template_p.read_text(encoding="utf-8")
+    # Injeta no <head> para garantir que o global esteja disponivel ANTES
+    # do script principal do dash rodar (que esta no final do <body>).
     injecao = (
         f"<script>window.__EMBED_AGG__ = {payload};"
-        f"window.__EMBED_SOURCE__ = {json.dumps(csv_p.name)};</script>\n</body>"
+        f"window.__EMBED_SOURCE__ = {json.dumps(csv_p.name)};</script>\n</head>"
     )
-    if "</body>" not in html:
-        raise SystemExit("Template sem </body>.")
-    html_final = html.replace("</body>", injecao, 1).replace(
+    if "</head>" not in html:
+        raise SystemExit("Template sem </head>.")
+    html_final = html.replace("</head>", injecao, 1).replace(
         "<title>Dashboard de Migracao de Renda - HRP5 vs HRP5_1B</title>",
         "<title>Dashboard de Migracao de Renda (estatico) - HRP5 vs HRP5_1B</title>",
         1,
