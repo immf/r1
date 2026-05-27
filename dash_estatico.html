@@ -86,6 +86,7 @@
   <div class="card span6">
     <h2>Matriz de migracao (HRP5 -> HRP5_1B)</h2>
     <div id="matriz"></div>
+    <div id="diagResumo" class="legend"></div>
     <div class="legend">Linha = faixa origem (HRP5). Coluna = faixa destino (HRP5_1B). Diagonal = manteve faixa.</div>
   </div>
 
@@ -276,6 +277,17 @@ function renderMatriz(M){
   html += `<td><b>${total}</b></td></tr>`;
   html += '</table>';
   document.getElementById("matriz").innerHTML = html;
+
+  const diagSum = M.reduce((s,r,i)=>s+r[i],0);
+  const foraDiag = total - diagSum;
+  const resumo = document.getElementById("diagResumo");
+  if (resumo){
+    const pctDiag = total ? (100*diagSum/total).toFixed(1) : "0.0";
+    const pctFora = total ? (100*foraDiag/total).toFixed(1) : "0.0";
+    resumo.innerHTML =
+      `<b>Diagonal (manteve faixa):</b> ${diagSum.toLocaleString("pt-BR")} / ${total.toLocaleString("pt-BR")} (${pctDiag}%) ` +
+      `&nbsp;&middot;&nbsp; <b>Fora da diagonal (mudou de faixa):</b> ${foraDiag.toLocaleString("pt-BR")} (${pctFora}%)`;
+  }
 }
 
 function fmtBRL(v){ return v.toLocaleString("pt-BR",{style:"currency",currency:"BRL",maximumFractionDigits:0}); }

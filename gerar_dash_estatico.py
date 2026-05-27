@@ -12,7 +12,6 @@ com o numero de linhas (so com o numero de faixas).
 """
 import csv
 import json
-import sys
 from pathlib import Path
 
 FAIXAS = [0, 1000, 2000, 3000, 5000, 10000, 20000, 100000]
@@ -116,7 +115,7 @@ def detect_sep(linha: str) -> str:
     return max([";", ",", "\t", "|"], key=lambda c: linha.count(c))
 
 
-def agregar(csv_path: Path) -> dict:
+def _agregar(csv_path: Path) -> dict:
     txt = csv_path.read_text(encoding="utf-8-sig")
     linhas = txt.splitlines()
     if not linhas:
@@ -157,18 +156,23 @@ def agregar(csv_path: Path) -> dict:
     return {"groups": groups, "nTotal": groups["T"]["n"], "faixas": FAIXAS}
 
 
-def main():
-    csv_path = Path(sys.argv[1] if len(sys.argv) > 1 else "dados_renda.csv")
-    out_path = Path(sys.argv[2] if len(sys.argv) > 2 else "dash_estatico.html")
-    template = Path("dash.html")
-    if not template.exists():
-        raise SystemExit("dash.html nao encontrado no diretorio atual.")
-    agg = agregar(csv_path)
+def dash(csv_path: str, template_path: str, out_path: str) -> None:
+    """Gera HTML estatico embutindo as estatisticas agregadas do CSV.
+
+    Todos os argumentos sao strings; o Path() e feito aqui dentro.
+    """
+    csv_p = Path(csv_path)
+    template_p = Path(template_path)
+    out_p = Path(out_path)
+    if not template_p.exists():
+        raise SystemExit(f"Template nao encontrado: {template_p}")
+
+    agg = _agregar(csv_p)
     payload = json.dumps(agg, ensure_ascii=False, separators=(",", ":"))
-    html = template.read_text(encoding="utf-8")
+    html = template_p.read_text(encoding="utf-8")
     injecao = (
         f"<script>window.__EMBED_AGG__ = {payload};"
-        f"window.__EMBED_SOURCE__ = {json.dumps(csv_path.name)};</script>\n</body>"
+        f"window.__EMBED_SOURCE__ = {json.dumps(csv_p.name)};</script>\n</body>"
     )
     if "</body>" not in html:
         raise SystemExit("Template sem </body>.")
@@ -177,12 +181,11 @@ def main():
         "<title>Dashboard de Migracao de Renda (estatico) - HRP5 vs HRP5_1B</title>",
         1,
     )
-    out_path.write_text(html_final, encoding="utf-8")
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    out_p.write_text(html_final, encoding="utf-8")
     size_kb = len(payload) / 1024
-    print(
-        f"Gerado {out_path} (N={agg['nTotal']}, payload agregado={size_kb:.1f} KB)."
-    )
+    print(f"Gerado {out_p} (N={agg['nTotal']}, payload agregado={size_kb:.1f} KB).")
 
 
 if __name__ == "__main__":
-    main()
+    dash("dados_renda.csv", "dash.html", "dash_estatico.html")
